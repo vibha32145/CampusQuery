@@ -51,13 +51,21 @@ export async function chattingGPT(question, sessionId = 'default') {
     .map(match => match.metadata.text)
     .join("\n\n---\n\n");
 
+  // If no context found, return fallback message
+  if (!context || context.trim().length === 0) {
+    const fallback = "I couldn’t find the details right now. Please reach out to the campus helpdesk at student_help@jssaten.ac.in for further assistance.";
+    history.push({ role: 'user', content: question });
+    history.push({ role: 'assistant', content: fallback });
+    return fallback;
+  }
+
   // Step 3: Use the original user question and found context for the final answer, with history
   const llm = new ChatOpenAI({
     openAIApiKey: process.env.OPENAI_API_KEY,
     model: "gpt-5-mini", //gpt-4o
     temperature: 0.2,
   });
-  const prompt =`You are CampusQuery, the official multilingual chatbot for JSS Academy of Technical Education. Answer student queries in a friendly and helpful manner. If the user greets, greet them and ask how you can help.\n\nIf a student asks about any notification, circular, or notice, only answer if the relevant information is present in the provided context. If the context is not sufficient, reply: "I couldn’t find the details right now. Please reach out to the campus helpdesk at student_help@jssaten.ac.in for further assistance."\n\nAlways keep answers clear, concise, and in the same language as the query whenever possible. Only use the provided context to answer.\n\nContext: ${context}`;
+  const prompt =`You are CampusQuery, the official multilingual chatbot for JSS Academy of Technical Education. Answer student queries in a friendly and helpful manner. If the user greets, greet them and ask how you can help.\n\nIf a student asks about any notification, circular, or notice, only answer if the relevant information is present in the provided context. If the context is not sufficient, reply: \"I couldn’t find the details right now. Please reach out to the campus helpdesk at student_help@jssaten.ac.in for further assistance.\"\n\nAlways keep answers clear, concise, and in the same language as the query whenever possible. Only use the provided context to answer.\n\nContext: ${context}`;
   const messages = [
     { role: 'system', content: prompt },
     ...history,
