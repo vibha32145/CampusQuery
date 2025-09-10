@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'react-hot-toast';
-import { getFiles, deleteFile, uploadFile } from '../services/mockApi';
+import { getFiles, deleteFile, uploadFile } from '../services/api';
 import FileList from '../components/FileList';
 import UploadDropzone from '../components/UploadDropzone';
 

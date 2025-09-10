@@ -1,4 +1,5 @@
 import { formatDistanceToNow } from 'date-fns';
+import { useState } from 'react';
 
 const statusIcons = {
   uploaded: (
@@ -25,6 +26,20 @@ const statusIcons = {
 };
 
 const FileList = ({ files, isLoading, onDelete }) => {
+  const [deletingFiles, setDeletingFiles] = useState(new Set());
+
+  const handleDelete = async (fileId) => {
+    setDeletingFiles(prev => new Set(prev).add(fileId));
+    try {
+      await onDelete(fileId);
+    } finally {
+      setDeletingFiles(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(fileId);
+        return newSet;
+      });
+    }
+  };
   if (isLoading) {
     return (
       <div className="flex justify-center items-center h-32">
@@ -90,20 +105,25 @@ const FileList = ({ files, isLoading, onDelete }) => {
                 </div>
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                {formatDistanceToNow(new Date(file.createdAt), { addSuffix: true })}
+                {formatDistanceToNow(new Date(file.createdAt || file.uploadedAt), { addSuffix: true })}
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                 {Math.round(file.size / 1024)} KB
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                 <button
-                  onClick={() => onDelete(file._id)}
-                  className="text-red-600 hover:text-red-900 p-1"
+                  onClick={() => handleDelete(file._id)}
+                  disabled={deletingFiles.has(file._id)}
+                  className="text-red-600 hover:text-red-900 p-1 disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Delete file"
                 >
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
+                  {deletingFiles.has(file._id) ? (
+                    <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-red-500"></div>
+                  ) : (
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  )}
                 </button>
               </td>
             </tr>
