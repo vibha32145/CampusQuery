@@ -19,11 +19,11 @@ const fileSchema = new mongoose.Schema({
         type: Number,
         required: true
     },
-    cloudinaryUrl: {
+    azureUrl: {
         type: String,
         required: true
     },
-    cloudinaryPublicId: {
+    azurePublicId: {
         type: String,
         required: true
     },

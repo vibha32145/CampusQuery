@@ -1,9 +1,17 @@
 import express from 'express';
 import multer from 'multer';
-import { v2 as cloudinary } from 'cloudinary';
+import { BlobServiceClient } from '@azure/storage-blob';
 import File from '../models/File.js';
 const router = express.Router();
-
+import dotenv from 'dotenv';
+dotenv.config();
+import fs from 'fs';
+import path from 'path';
+import { PDFLoader } from '@langchain/community/document_loaders/fs/pdf';
+import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
+import { GoogleGenerativeAIEmbeddings } from '@langchain/google-genai';
+import { Pinecone } from '@pinecone-database/pinecone';
+import { PineconeStore } from '@langchain/pinecone';
 // Configure multer for memory storage
 const storage = multer.memoryStorage();
 const upload = multer({
@@ -27,28 +35,59 @@ const upload = multer({
     }
 });
 
-// Upload file to Cloudinary
-const uploadToCloudinary = (buffer, originalName, mimetype) => {
-    return new Promise((resolve, reject) => {
-        const resourceType = mimetype === 'application/pdf' ? 'image' : 'raw';
-        
-        cloudinary.uploader.upload_stream(
-            {
-                resource_type: resourceType,
-                folder: 'campus-query-documents',
-                public_id: `${Date.now()}-${originalName.split('.')[0]}`,
-                format: mimetype === 'application/pdf' ? 'pdf' : 'auto'
-            },
-            (error, result) => {
-                if (error) {
-                    reject(error);
-                } else {
-                    resolve(result);
-                }
-            }
-        ).end(buffer);
+// Azure Blob Storage setup
+const AZURE_STORAGE_CONNECTION_STRING = process.env.AZURE_STORAGE_CONNECTION_STRING;
+const AZURE_STORAGE_CONTAINER_NAME = process.env.AZURE_STORAGE_CONTAINER_NAME;
+const blobServiceClient = BlobServiceClient.fromConnectionString(AZURE_STORAGE_CONNECTION_STRING);
+const containerClient = blobServiceClient.getContainerClient(AZURE_STORAGE_CONTAINER_NAME);
+
+// Upload file to Azure Blob Storage (PDF only)
+const uploadToAzureBlob = async (buffer, originalName) => {
+    const blobName = `${Date.now()}-${originalName}`;
+    const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+    await blockBlobClient.uploadData(buffer, {
+        blobHTTPHeaders: { blobContentType: 'application/pdf' }
     });
+    return { url: blockBlobClient.url, blobName };
 };
+
+// Delete file from Azure Blob Storage
+const deleteFromAzureBlob = async (blobName) => {
+    const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+    await blockBlobClient.deleteIfExists();
+};
+
+
+// Helper: Download PDF from Azure Blob Storage to local documents folder
+async function downloadPdfFromAzure(url, localPath) {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Failed to download PDF from Azure');
+    const buffer = await response.arrayBuffer();
+    fs.writeFileSync(localPath, Buffer.from(buffer));
+    console.log("Downloaded PDF");
+}
+
+// Helper: Chunk and embed a single PDF file (like embedder.js, but for one file)
+async function chunkAndEmbedPdf(localPath) {
+    const pdfLoader = new PDFLoader(localPath);
+    const rawDocs = await pdfLoader.load();
+    const textSplitter = new RecursiveCharacterTextSplitter({
+        chunkSize: 1000,
+        chunkOverlap: 200,
+    });
+    const chunkedDocs = await textSplitter.splitDocuments(rawDocs);
+    const embeddings = new GoogleGenerativeAIEmbeddings({
+        apiKey: process.env.GEMINI_API_KEY,
+        model: 'text-embedding-004',
+    });
+    const pinecone = new Pinecone();
+    const pineconeIndex = pinecone.Index(process.env.PINECONE_INDEX_NAME);
+    await PineconeStore.fromDocuments(chunkedDocs, embeddings, {
+        pineconeIndex,
+        maxConcurrency: 5,
+    });
+    console.log('PDF chunked and embedded successfully');
+}
 
 // POST /api/files/upload - Upload a new file
 router.post('/upload', upload.single('file'), async (req, res) => {
@@ -59,8 +98,8 @@ router.post('/upload', upload.single('file'), async (req, res) => {
 
         const { originalname, mimetype, size, buffer } = req.file;
 
-        // Upload to Cloudinary
-        const cloudinaryResult = await uploadToCloudinary(buffer, originalname, mimetype);
+        // Upload to Azure Blob Storage (PDF only)
+        const azureResult = await uploadToAzureBlob(buffer, originalname);
 
         // Determine file format
         let format = 'Unknown';
@@ -78,13 +117,31 @@ router.post('/upload', upload.single('file'), async (req, res) => {
             originalName: originalname,
             mimetype: mimetype,
             size: size,
-            cloudinaryUrl: cloudinaryResult.secure_url,
-            cloudinaryPublicId: cloudinaryResult.public_id,
+            azureUrl: azureResult.url,
+            azurePublicId: azureResult.blobName,
             format: format,
             status: 'ready'
         });
 
         const savedFile = await newFile.save();
+
+        // If PDF, download from Azure and trigger chunking/embedding
+        if (format === 'PDF') {
+            const documentsDir = path.join(process.cwd(), 'documents');
+            if (!fs.existsSync(documentsDir)) {
+                fs.mkdirSync(documentsDir);
+            }
+            const localPath = path.join(documentsDir, azureResult.blobName);
+            try {
+                await downloadPdfFromAzure(azureResult.url, localPath);
+                await chunkAndEmbedPdf(localPath);
+                // Optionally, update status in MongoDB to 'processed' or similar
+                await File.findByIdAndUpdate(savedFile._id, { status: 'processed' });
+            } catch (embedErr) {
+                console.error('Chunk/embed error:', embedErr);
+                await File.findByIdAndUpdate(savedFile._id, { status: 'error' });
+            }
+        }
 
         res.status(201).json({
             message: 'File uploaded successfully',
@@ -101,11 +158,9 @@ router.post('/upload', upload.single('file'), async (req, res) => {
 
     } catch (error) {
         console.error('Upload error:', error);
-        
-        if (error.message.includes('Only PDF and Word documents')) {
+        if (error.message && error.message.includes('Only PDF and Word documents')) {
             return res.status(400).json({ error: error.message });
         }
-        
         res.status(500).json({ 
             error: 'Failed to upload file',
             details: error.message 
@@ -166,12 +221,13 @@ router.delete('/:id', async (req, res) => {
             return res.status(404).json({ error: 'File not found' });
         }
 
-        // Delete from Cloudinary
+
+        // Delete from Azure Blob Storage
         try {
-            await cloudinary.uploader.destroy(file.cloudinaryPublicId);
-        } catch (cloudinaryError) {
-            console.error('Cloudinary deletion error:', cloudinaryError);
-            // Continue with MongoDB deletion even if Cloudinary fails
+            await deleteFromAzureBlob(file.azurePublicId);
+        } catch (azureError) {
+            console.error('Azure Blob deletion error:', azureError);
+            // Continue with MongoDB deletion even if Azure fails
         }
 
         // Delete from MongoDB
