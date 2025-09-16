@@ -8,6 +8,9 @@ import { v2 as cloudinary } from 'cloudinary';
 import { chatting } from './controllers/chatController.js'; //GEmini wallah
 import { chattingGPT } from './controllers/chatControllerGpt.js'; //GPT wallah
 
+import TelegramBot from "node-telegram-bot-api";
+import axios from "axios";
+
 dotenv.config();
 
 const app = express();
@@ -54,6 +57,63 @@ app.post('/chat', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+
+
+// 🚀 Telegram Bot Integration (POLLING MODE)
+if (process.env.TELEGRAM_BOT_TOKEN) {
+    const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
+
+    bot.on("message", async (msg) => {
+        const chatId = msg.chat.id;
+        const userMessage = msg.text;
+
+        if (!userMessage) return;
+
+        try {
+            // Call your existing /chat route
+            const response = await axios.post(`http://localhost:${PORT}/chat`, {
+                question: userMessage,
+            });
+
+            const reply = response.data.answer || "No answer available.";
+            bot.sendMessage(chatId, reply);
+        } catch (error) {
+            console.error("Telegram bot error:", error.message);
+            bot.sendMessage(chatId, "⚠️ Something went wrong, please try again.");
+        }
+    });
+
+    console.log("🤖 Telegram bot is running...");
+} else {
+    console.log("⚠️ TELEGRAM_BOT_TOKEN not set in .env, skipping Telegram bot setup.");
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // Start the server
 app.listen(PORT, () => {

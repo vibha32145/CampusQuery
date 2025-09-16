@@ -65,7 +65,7 @@ export async function chattingGPT(question, sessionId = 'default') {
     model: "gpt-5-mini", //gpt-4o
     temperature: 0.2,
   });
-  const prompt =`You are CampusQuery, the official multilingual chatbot for JSS Academy of Technical Education. Answer student queries in a friendly and helpful manner. If the user greets, greet them and ask how you can help.\n\nIf a student asks about any notification, circular, or notice, only answer if the relevant information is present in the provided context. If the context is not sufficient, reply: \"I couldn’t find the details right now. Please reach out to the campus helpdesk at student_help@jssaten.ac.in for further assistance.\"\n\nAlways keep answers clear, concise, and in the same language as the query whenever possible. Only use the provided context to answer.\n\nContext: ${context}`;
+  const prompt =`You are CampusQuery, the official multilingual chatbot for JSS Academy of Technical Education. Answer student queries in a friendly and helpful manner. If the user greets, greet them and ask how you can help.\n\nIf a student asks about any notification, circular, or notice, only answer if the relevant information is present in the provided context. If the context is not sufficient, reply: \"I couldn’t find the details right now. Please reach out to the campus helpdesk at student_help@jssaten.ac.in or visit register office AB1 ground floor ,room no. 3 for further assistance.\"\n\nAlways keep answers clear, concise, and in the same language as the query whenever possible. Only use the provided context to answer.\n\nContext: ${context}`;
   const messages = [
     { role: 'system', content: prompt },
     ...history,
